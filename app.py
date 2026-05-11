@@ -38,6 +38,7 @@ from models.category import Category
 from models.product import Product
 from models.sale import Sale, SaleItem
 from models.order import Order, OrderItem
+from models.market import Market
 
 from routes.auth import auth_bp
 from routes.products import products_bp
@@ -46,6 +47,7 @@ from routes.sales import sales_bp
 from routes.orders import orders_bp
 from routes.users import users_bp
 from routes.reports import reports_bp
+from routes.superadmin import superadmin_bp
 
 app.register_blueprint(auth_bp,       url_prefix='/api/auth')
 app.register_blueprint(products_bp,   url_prefix='/api/products')
@@ -54,6 +56,7 @@ app.register_blueprint(sales_bp,      url_prefix='/api/sales')
 app.register_blueprint(orders_bp,     url_prefix='/api/orders')
 app.register_blueprint(users_bp,      url_prefix='/api/users')
 app.register_blueprint(reports_bp,    url_prefix='/api/reports')
+app.register_blueprint(superadmin_bp,  url_prefix='/api/superadmin')
 
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=5001)

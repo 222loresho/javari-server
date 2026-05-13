@@ -18,7 +18,8 @@ def admin_required():
 def get_users():
     err = admin_required()
     if err: return err
-    return jsonify([{"id": u.id, "name": u.name, "username": u.username, "role": u.role, "active": u.active, "pin": u.pin} for u in User.query.all()])
+    allowed = ["cashier", "waiter"]
+    return jsonify([{"id": u.id, "name": u.name, "username": u.username, "role": u.role, "active": u.active, "pin": u.pin} for u in User.query.all() if u.role in allowed])
 
 @users_bp.route("/", methods=["POST"])
 @jwt_required()
@@ -34,6 +35,8 @@ def create_user():
         return jsonify({"error": "Name and username required"}), 400
     if len(pin) != 4 or not pin.isdigit():
         return jsonify({"error": "PIN must be exactly 4 digits"}), 400
+    if role in ["admin", "super_admin"]:
+        return jsonify({"error": "Only super admin can create admin accounts"}), 403
     if User.query.filter(db.func.lower(User.username) == username).first():
         return jsonify({"error": "Username already exists"}), 400
     u = User(name=name, username=username, password="", role=role, active=True, pin=pin)
@@ -47,9 +50,14 @@ def update_user(uid):
     err  = admin_required()
     if err: return err
     u    = User.query.get_or_404(uid)
+    if u.role in ["admin","super_admin"]:
+        return jsonify({"error": "Only super admin can manage admin accounts"}), 403
     data = request.get_json()
     if "name"   in data: u.name   = data["name"].strip()
-    if "role"   in data: u.role   = data["role"]
+    if "role"   in data:
+        if data["role"] in ["admin","super_admin"]:
+            return jsonify({"error": "Only super admin can assign admin roles"}), 403
+        u.role = data["role"]
     if "active" in data: u.active = data["active"]
     if "pin" in data and data["pin"]:
         pin = str(data["pin"]).strip()
@@ -67,6 +75,8 @@ def delete_user(uid):
     if current_user().id == uid:
         return jsonify({"error": "Cannot delete yourself"}), 400
     u = User.query.get_or_404(uid)
+    if u.role in ["admin","super_admin"]:
+        return jsonify({"error": "Only super admin can delete admin accounts"}), 403
     try:
         db.session.delete(u)
         db.session.commit()

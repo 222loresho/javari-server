@@ -2,27 +2,46 @@ from dotenv import load_dotenv
 import os
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from extensions import db, jwt
-import os
 from datetime import timedelta
+
+def required_env(name):
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set. For local development copy .env.example to .env; "
+            f"for hosting, set it in the service's environment variables."
+        )
+    return value
 
 app = Flask(__name__)
 
+default_origins = [
+    "https://222loresho.github.io",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+]
+extra_origins = [
+    origin.strip()
+    for origin in os.environ.get("FRONTEND_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 CORS(app,
-     origins=[
-         "https://222loresho.github.io",
-         "http://localhost:5173",
-         "http://127.0.0.1:5173",
-         "http://localhost:3000",
-     ],
+     origins=default_origins + extra_origins,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
      supports_credentials=True)
 
-app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET", "09333f71c3fd95637e321ff2f35feccf08d1e9a7c505f7d215863210b6feae49")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "postgresql://postgres.brkvmeleudpontlxmmir:0OHz1aGVi2fye7EA@aws-1-eu-west-1.pooler.supabase.com:6543/postgres")
+jwt_secret = required_env("JWT_SECRET")
+if len(jwt_secret) < 32:
+    raise RuntimeError("JWT_SECRET must be at least 32 characters long.")
+
+app.config["JWT_SECRET_KEY"] = jwt_secret
+app.config["SQLALCHEMY_DATABASE_URI"] = required_env("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_pre_ping": True,
@@ -58,5 +77,13 @@ app.register_blueprint(users_bp,      url_prefix='/api/users')
 app.register_blueprint(reports_bp,    url_prefix='/api/reports')
 app.register_blueprint(superadmin_bp,  url_prefix='/api/superadmin')
 
+@app.get("/api/health")
+def health():
+    return jsonify(status="ok")
+
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", "5001")),
+    )

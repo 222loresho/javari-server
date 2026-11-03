@@ -22,6 +22,19 @@ def pin_error(pin):
         return "PIN must be exactly 4 digits"
     return None
 
+def resolve_manager(value):
+    """None means unassigned, False means invalid, otherwise a manager id."""
+    if value in ("", None):
+        return None
+    try:
+        mid = int(value)
+    except (TypeError, ValueError):
+        return False
+    mgr = User.query.get(mid)
+    if not mgr or mgr.role != "manager":
+        return False
+    return mgr.id
+
 def serialize(u, managers):
     return {
         "id":           u.id,
@@ -60,8 +73,8 @@ def create_user():
         return jsonify({"error": "Name and username required"}), 400
 
     if me.role == "admin":
-        if role != "manager":
-            return jsonify({"error": "Admins create manager accounts. Managers create their own staff."}), 403
+        if role not in ["manager"] + STAFF_ROLES:
+            return jsonify({"error": "Role must be manager, cashier or waiter"}), 400
     elif role not in STAFF_ROLES:
         return jsonify({"error": "Managers can only create cashier or waiter accounts"}), 403
 
@@ -70,9 +83,17 @@ def create_user():
     if User.query.filter(db.func.lower(User.username) == username).first():
         return jsonify({"error": "Username already exists"}), 400
 
+    manager_id = None
+    if me.role == "manager":
+        manager_id = me.id
+    elif role in STAFF_ROLES:
+        manager_id = resolve_manager(data.get("manager_id"))
+        if manager_id is False:
+            return jsonify({"error": "Selected manager not found"}), 400
+
     u = User(
         name=name, username=username, password="", role=role, active=True,
-        pin=pin, manager_id=me.id if me.role == "manager" else None,
+        pin=pin, manager_id=manager_id,
     )
     db.session.add(u)
     db.session.commit()
@@ -97,12 +118,27 @@ def update_user(uid):
         if not name:
             return jsonify({"error": "Name cannot be empty"}), 400
         u.name = name
-    if "role" in data:
+    if "role" in data and data["role"] != u.role:
         new_role = data["role"]
-        allowed  = ["manager"] if (me.role == "admin" and u.role == "manager") else STAFF_ROLES
-        if new_role not in allowed:
-            return jsonify({"error": "Invalid role change"}), 403
+        if me.role != "admin":
+            return jsonify({"error": "Managers cannot change roles"}), 403
+        if new_role not in ["manager"] + STAFF_ROLES:
+            return jsonify({"error": "Role must be manager, cashier or waiter"}), 400
+        if u.role == "manager" and new_role in STAFF_ROLES:
+            staff = User.query.filter_by(manager_id=u.id).count()
+            if staff:
+                return jsonify({"error": f"{u.name} still manages {staff} staff member(s). Reassign them first."}), 400
         u.role = new_role
+        if new_role == "manager":
+            u.manager_id = None
+    if me.role == "admin" and "manager_id" in data:
+        if u.role == "manager":
+            u.manager_id = None
+        else:
+            manager_id = resolve_manager(data.get("manager_id"))
+            if manager_id is False:
+                return jsonify({"error": "Selected manager not found"}), 400
+            u.manager_id = manager_id
     if "active" in data:
         u.active = bool(data["active"])
     if data.get("pin"):

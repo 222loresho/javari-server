@@ -59,6 +59,23 @@ from models.sale import Sale, SaleItem
 from models.order import Order, OrderItem
 from models.market import Market
 
+from sqlalchemy import inspect, text
+
+def ensure_schema():
+    with app.app_context():
+        inspector = inspect(db.engine)
+        if "users" not in inspector.get_table_names():
+            return
+        columns = {c["name"] for c in inspector.get_columns("users")}
+        if "manager_id" not in columns:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN manager_id INTEGER"))
+
+try:
+    ensure_schema()
+except Exception as exc:
+    app.logger.error("Could not verify users.manager_id column: %s", exc)
+
 from routes.auth import auth_bp
 from routes.products import products_bp
 from routes.categories import categories_bp

@@ -70,11 +70,9 @@ def ensure_schema():
         if "manager_id" not in columns:
             with db.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN manager_id INTEGER"))
+            app.logger.info("Added users.manager_id column")
 
-try:
-    ensure_schema()
-except Exception as exc:
-    app.logger.error("Could not verify users.manager_id column: %s", exc)
+ensure_schema()
 
 from routes.auth import auth_bp
 from routes.products import products_bp

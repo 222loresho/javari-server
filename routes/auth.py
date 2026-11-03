@@ -33,3 +33,23 @@ def verify_pin():
     if user.pin and user.pin.strip() == data.get("pin", "").strip():
         return jsonify({"valid": True})
     return jsonify({"valid": False})
+
+@auth_bp.route("/change-pin", methods=["POST"])
+@jwt_required()
+def change_pin():
+    data    = request.get_json() or {}
+    current = str(data.get("current_pin", "")).strip()
+    new_pin = str(data.get("new_pin", "")).strip()
+    user    = User.query.get(get_jwt_identity())
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if not user.pin or user.pin.strip() != current:
+        return jsonify({"error": "Current PIN is incorrect"}), 401
+    required = 6 if user.role in ("admin", "super_admin") else 4
+    if len(new_pin) != required or not new_pin.isdigit():
+        return jsonify({"error": f"PIN must be exactly {required} digits"}), 400
+    if new_pin == current:
+        return jsonify({"error": "New PIN must be different"}), 400
+    user.pin = new_pin
+    db.session.commit()
+    return jsonify({"message": "PIN updated", "pin_length": required})

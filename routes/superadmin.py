@@ -162,10 +162,7 @@ def create_user():
     role = d.get("role","admin")
     if not name or not username:
         return jsonify({"error": "Name and username required"}), 400
-    if role in ("admin", "super_admin"):
-        if len(pin) != 6 or not pin.isdigit():
-            return jsonify({"error": "Admin accounts require a 6-digit PIN"}), 400
-    elif len(pin) != 4 or not pin.isdigit():
+    if len(pin) != 4 or not pin.isdigit():
         return jsonify({"error": "PIN must be 4 digits"}), 400
     if User.query.filter(db.func.lower(User.username) == username).first():
         return jsonify({"error": "Username already exists"}), 400

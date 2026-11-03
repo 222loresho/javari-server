@@ -45,11 +45,10 @@ def change_pin():
         return jsonify({"error": "User not found"}), 404
     if not user.pin or user.pin.strip() != current:
         return jsonify({"error": "Current PIN is incorrect"}), 401
-    required = 6 if user.role in ("admin", "super_admin") else 4
-    if len(new_pin) != required or not new_pin.isdigit():
-        return jsonify({"error": f"PIN must be exactly {required} digits"}), 400
+    if len(new_pin) != 4 or not new_pin.isdigit():
+        return jsonify({"error": "PIN must be exactly 4 digits"}), 400
     if new_pin == current:
         return jsonify({"error": "New PIN must be different"}), 400
     user.pin = new_pin
     db.session.commit()
-    return jsonify({"message": "PIN updated", "pin_length": required})
+    return jsonify({"message": "PIN updated", "pin_length": 4})

@@ -71,6 +71,12 @@ def ensure_schema():
             with db.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE users ADD COLUMN manager_id INTEGER"))
             app.logger.info("Added users.manager_id column")
+        if "products" in inspector.get_table_names():
+            product_columns = {c["name"] for c in inspector.get_columns("products")}
+            if "image_url" not in product_columns:
+                with db.engine.begin() as conn:
+                    conn.execute(text("ALTER TABLE products ADD COLUMN image_url VARCHAR(500)"))
+                app.logger.info("Added products.image_url column")
 
 ensure_schema()
 

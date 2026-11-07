@@ -7,14 +7,14 @@ products_bp = Blueprint("products", __name__)
 
 @products_bp.route("/", methods=["GET"])
 def get_products():
-    return jsonify([{"id": p.id, "name": p.name, "price": float(p.price), "stock": p.stock, "category_id": p.category_id} for p in Product.query.all()])
+    return jsonify([{"id": p.id, "name": p.name, "price": float(p.price), "stock": p.stock, "category_id": p.category_id, "image_url": p.image_url} for p in Product.query.all()])
 
 @products_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_product():
     data = request.get_json()
     cat  = data.get("category_id") or None
-    p    = Product(name=data["name"], price=data["price"], stock=data.get("stock", 0), category_id=cat)
+    p    = Product(name=data["name"], price=data["price"], stock=data.get("stock", 0), category_id=cat, image_url=data.get("image_url") or None)
     db.session.add(p)
     db.session.commit()
     return jsonify({"message": "Product created"}), 201
@@ -28,6 +28,8 @@ def update_product(pid):
     p.price       = data.get("price",       p.price)
     p.stock       = data.get("stock",       p.stock)
     p.category_id = data.get("category_id") or None
+    if "image_url" in data:
+        p.image_url = data.get("image_url") or None
     db.session.commit()
     return jsonify({"message": "Product updated"})
 
@@ -44,4 +46,4 @@ def delete_product(pid):
 def low_stock():
     threshold = request.args.get("threshold", 10, type=int)
     products  = Product.query.filter(Product.stock <= threshold).order_by(Product.stock.asc()).all()
-    return jsonify([{"id": p.id, "name": p.name, "stock": p.stock, "price": float(p.price), "category_id": p.category_id} for p in products])
+    return jsonify([{"id": p.id, "name": p.name, "stock": p.stock, "price": float(p.price), "category_id": p.category_id, "image_url": p.image_url} for p in products])

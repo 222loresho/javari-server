@@ -7,3 +7,4 @@ class Product(db.Model):
     price       = db.Column(db.Numeric(10,2), nullable=False)
     stock       = db.Column(db.Integer,       default=0)
     category_id = db.Column(db.Integer,       db.ForeignKey("categories.id"), nullable=True)
+    image_url   = db.Column(db.String(500),   nullable=True)

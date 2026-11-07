@@ -80,6 +80,19 @@ def ensure_schema():
 
 ensure_schema()
 
+def sync_menu_catalog():
+    with app.app_context():
+        inspector = inspect(db.engine)
+        tables = set(inspector.get_table_names())
+        if not {"products", "categories"} <= tables:
+            return
+        from menu_catalog import sync_menu
+        added = sync_menu()
+        if added:
+            app.logger.info("Synced %d menu products into the POS catalog", added)
+
+sync_menu_catalog()
+
 from routes.auth import auth_bp
 from routes.products import products_bp
 from routes.categories import categories_bp

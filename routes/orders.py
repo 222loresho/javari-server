@@ -4,9 +4,13 @@ from extensions import db
 from models.order import Order, OrderItem, kenya_time
 from models.sale import Sale, SaleItem
 from models.product import Product
+from line_items import build_lines
 from tenant import current_user, scoped, in_venue
 
 orders_bp = Blueprint("orders", __name__)
+
+CASHIER_ROLES = ("admin", "manager", "cashier")
+
 
 def load_order(oid):
     order = Order.query.get_or_404(oid)
@@ -14,105 +18,140 @@ def load_order(oid):
         abort(404)
     return order
 
-def items_in_venue(user, items):
-    for item in items:
-        product = Product.query.get(item["product_id"])
-        if not product or not in_venue(product, user):
-            return False
-    return True
+
+def _require_staff():
+    user = current_user()
+    if user is None:
+        return None, (jsonify({"error": "Account is inactive"}), 401)
+    return user, None
+
+
+def _require_cashier():
+    user, err = _require_staff()
+    if err:
+        return None, err
+    if user.role not in CASHIER_ROLES and user.role != "super_admin":
+        return None, (jsonify({"error": "Only a cashier, manager or admin can do this"}), 403)
+    return user, None
+
 
 @orders_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_orders():
     return jsonify([serialize(o) for o in scoped(Order).filter_by(status="pending").order_by(Order.created_at.desc()).all()])
 
+
 @orders_bp.route("/submitted", methods=["GET"])
 @jwt_required()
 def get_submitted():
     return jsonify([serialize(o) for o in scoped(Order).filter_by(status="submitted").order_by(Order.submitted_at.desc()).all()])
+
 
 @orders_bp.route("/confirmed", methods=["GET"])
 @jwt_required()
 def get_confirmed():
     return jsonify([serialize(o) for o in scoped(Order).filter_by(status="confirmed").order_by(Order.confirmed_at.desc()).limit(50).all()])
 
+
 @orders_bp.route("/completed", methods=["GET"])
 @jwt_required()
 def get_completed():
     return jsonify([serialize(o) for o in scoped(Order).filter_by(status="completed").order_by(Order.created_at.desc()).limit(100).all()])
 
+
 @orders_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_order():
-    data = request.json
-    user = current_user()
-    if not items_in_venue(user, data["items"]):
-        return jsonify({"error": "Unknown product in cart"}), 400
-    last     = Order.query.order_by(Order.id.desc()).first()
+    user, err = _require_staff()
+    if err: return err
+    data  = request.get_json(silent=True) or {}
+    table = str(data.get("table_name") or "").strip()[:50]
+    if not table:
+        return jsonify({"error": "Table name required"}), 400
+    lines, total, err = build_lines(user, data.get("items"))
+    if err:
+        return jsonify({"error": err}), 400
+
+    last = Order.query.filter(Order.market_id == user.market_id).order_by(Order.id.desc()).first()
     next_num = (last.id + 1) if last else 1
-    order    = Order(
-        table_name   = data["table_name"],
+    order = Order(
+        table_name   = table,
         cashier_id   = user.id,
         cashier_name = user.name,
-        waiter_name  = data.get("waiter_name", user.name),
+        waiter_name  = str(data.get("waiter_name") or user.name)[:100],
         status       = "pending",
-        total        = data["total"],
+        total        = total,
         order_number = f"#{next_num:04d}",
         created_at   = kenya_time(),
         market_id    = user.market_id,
     )
     db.session.add(order)
     db.session.flush()
-    for item in data["items"]:
+    for line in lines:
         db.session.add(OrderItem(
             order_id     = order.id,
-            product_id   = item["product_id"],
-            product_name = item["product_name"],
-            quantity     = item["quantity"],
-            price        = item["price"],
-            subtotal     = item["subtotal"]
+            product_id   = line["product"].id,
+            product_name = line["name"],
+            quantity     = line["quantity"],
+            price        = line["price"],
+            subtotal     = line["subtotal"]
         ))
     db.session.commit()
-    return jsonify({"message": "Order created", "id": order.id, "order_number": order.order_number}), 201
+    return jsonify({"message": "Order created", "id": order.id, "order_number": order.order_number, "total": total}), 201
+
 
 @orders_bp.route("/<int:oid>", methods=["PUT"])
 @jwt_required()
 def update_order(oid):
+    user, err = _require_staff()
+    if err: return err
     order = load_order(oid)
-    data  = request.json
-    if not items_in_venue(current_user(), data["items"]):
-        return jsonify({"error": "Unknown product in cart"}), 400
-    order.total = data["total"]
+    if order.status != "pending":
+        return jsonify({"error": "Only pending orders can be edited"}), 400
+    data = request.get_json(silent=True) or {}
+    lines, total, err = build_lines(user, data.get("items"))
+    if err:
+        return jsonify({"error": err}), 400
+    order.total = total
     OrderItem.query.filter_by(order_id=oid).delete()
-    for item in data["items"]:
+    for line in lines:
         db.session.add(OrderItem(
             order_id     = oid,
-            product_id   = item["product_id"],
-            product_name = item["product_name"],
-            quantity     = item["quantity"],
-            price        = item["price"],
-            subtotal     = item["subtotal"]
+            product_id   = line["product"].id,
+            product_name = line["name"],
+            quantity     = line["quantity"],
+            price        = line["price"],
+            subtotal     = line["subtotal"]
         ))
     db.session.commit()
-    return jsonify({"message": "Order updated"})
+    return jsonify({"message": "Order updated", "total": total})
+
 
 @orders_bp.route("/<int:oid>/submit", methods=["POST"])
 @jwt_required()
 def submit_order(oid):
+    _, err = _require_staff()
+    if err: return err
     order = load_order(oid)
-    data  = request.json
+    if order.status != "pending":
+        return jsonify({"error": "This order is not pending"}), 400
+    data = request.get_json(silent=True) or {}
     order.status          = "submitted"
-    order.payment_method  = data.get("payment_method", "cash")
-    order.payment_details = data.get("splits", [])
+    order.payment_method  = str(data.get("payment_method") or "cash")[:50]
+    order.payment_details = data.get("splits") if isinstance(data.get("splits"), list) else []
     order.submitted_at    = kenya_time()
     db.session.commit()
     return jsonify({"message": "Order submitted for confirmation"})
 
+
 @orders_bp.route("/<int:oid>/confirm", methods=["POST"])
 @jwt_required()
 def confirm_order(oid):
-    user  = current_user()
+    user, err = _require_cashier()
+    if err: return err
     order = load_order(oid)
+    if order.status != "submitted":
+        return jsonify({"error": "Only submitted orders can be confirmed"}), 400
     total = float(order.total)
     sale = Sale(
         cashier_id     = user.id,
@@ -144,27 +183,38 @@ def confirm_order(oid):
     db.session.commit()
     return jsonify({"message": "Order confirmed", "change_due": 0})
 
+
 @orders_bp.route("/<int:oid>/reject", methods=["POST"])
 @jwt_required()
 def reject_order(oid):
+    _, err = _require_cashier()
+    if err: return err
     order = load_order(oid)
-    data  = request.json
+    if order.status != "submitted":
+        return jsonify({"error": "Only submitted orders can be rejected"}), 400
+    data = request.get_json(silent=True) or {}
     order.status          = "pending"
-    order.rejection_note  = data.get("note", "Payment rejected by cashier")
+    order.rejection_note  = str(data.get("note") or "Payment rejected by cashier")[:500]
     order.payment_method  = None
     order.payment_details = None
     order.submitted_at    = None
     db.session.commit()
     return jsonify({"message": "Order rejected"})
 
+
 @orders_bp.route("/<int:oid>", methods=["DELETE"])
 @jwt_required()
 def delete_order(oid):
+    user, err = _require_staff()
+    if err: return err
     order = load_order(oid)
+    if order.status != "pending" and user.role not in ("admin", "super_admin"):
+        return jsonify({"error": "Only an admin can cancel a submitted or confirmed order"}), 403
     OrderItem.query.filter_by(order_id=oid).delete()
     db.session.delete(order)
     db.session.commit()
     return jsonify({"message": "Order cancelled"})
+
 
 def serialize(o):
     return {

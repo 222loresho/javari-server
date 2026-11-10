@@ -15,6 +15,8 @@ def require_manager_or_admin():
     u = current_user()
     if not u or not u.active or u.role not in ("admin", "manager"):
         return None, (jsonify({"error": "Manager or admin access required"}), 403)
+    if not u.market_id:
+        return None, (jsonify({"error": "Your account has no venue yet. Ask the super admin."}), 403)
     return u, None
 
 def pin_error(pin):

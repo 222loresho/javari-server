@@ -2,8 +2,10 @@ from dotenv import load_dotenv
 import os
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
+from werkzeug.middleware.proxy_fix import ProxyFix
 from extensions import db, jwt
 from datetime import timedelta
 
@@ -17,6 +19,7 @@ def required_env(name):
     return value
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 default_origins = [
     "https://222loresho.github.io",
@@ -102,6 +105,15 @@ def ensure_venue_codes():
         app.logger.info("Assigned venue code %s to %s", m.code, m.name)
     if changed:
         db.session.commit()
+    if db.engine.dialect.name == "postgresql":
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_markets_code "
+                    "ON markets (upper(code)) WHERE code IS NOT NULL"
+                ))
+        except Exception:
+            app.logger.exception("Could not enforce venue code uniqueness")
 
 def ensure_username_scope():
     """Usernames are unique per venue (plus one platform namespace), not globally."""
@@ -132,6 +144,30 @@ def ensure_username_scope():
         app.logger.exception("Could not scope usernames per venue")
 
 ensure_schema()
+
+@app.before_request
+def reject_inactive_tokens():
+    """A signed-in account must still exist and be active on every request."""
+    if request.method == "OPTIONS" or not request.headers.get("Authorization"):
+        return None
+    try:
+        verify_jwt_in_request(optional=True)
+    except Exception:
+        return None
+    ident = get_jwt_identity()
+    if ident is None:
+        return None
+    user = User.query.get(ident)
+    if not user or not user.active:
+        return jsonify({"error": "This account is inactive. Ask your admin."}), 401
+    return None
+
+@app.after_request
+def security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
 
 def sync_menu_catalog():
     with app.app_context():

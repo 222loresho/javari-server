@@ -17,7 +17,7 @@ KENYA_TZ      = timezone(timedelta(hours=3))
 def require_superadmin():
     uid  = get_jwt_identity()
     user = User.query.get(uid)
-    if not user or user.role != "super_admin":
+    if not user or not user.active or user.role != "super_admin":
         return jsonify({"error": "Super admin access required"}), 403
     return None
 
@@ -35,8 +35,8 @@ def get_markets():
 def create_market():
     err = require_superadmin()
     if err: return err
-    d    = request.get_json()
-    name = d.get("name","").strip()
+    d    = request.get_json(silent=True) or {}
+    name = str(d.get("name") or "").strip()
     if not name:
         return jsonify({"error": "Venue name required"}), 400
     code = venue_code_for(name, {m.code.upper() for m in Market.query.all() if m.code})
@@ -64,7 +64,7 @@ def update_market(mid):
     err = require_superadmin()
     if err: return err
     m = Market.query.get_or_404(mid)
-    d = request.get_json()
+    d = request.get_json(silent=True) or {}
     if "code" in d and (d["code"] or "").strip().upper() != (m.code or ""):
         return jsonify({"error": "Venue codes are permanent and cannot be changed"}), 400
     for field in ["name","location","contact_name","contact_email","contact_phone","plan","monthly_fee","currency","status","api_url","notes"]:
@@ -179,10 +179,10 @@ def all_users():
 def create_user():
     err = require_superadmin()
     if err: return err
-    d    = request.get_json()
-    name = d.get("name","").strip()
-    username = d.get("username","").strip().lower()
-    pin  = str(d.get("pin","")).strip()
+    d    = request.get_json(silent=True) or {}
+    name = str(d.get("name") or "").strip()
+    username = str(d.get("username") or "").strip().lower()
+    pin  = str(d.get("pin") or "").strip()
     role = d.get("role","admin")
     if role not in ("admin", "super_admin"):
         return jsonify({"error": "Super admins create admins for a venue"}), 400

@@ -6,6 +6,7 @@ from models.market import Market
 from models.sale import Sale
 from models.order import Order
 from models.product import Product
+from models.category import Category
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 
@@ -73,6 +74,16 @@ def delete_market(mid):
     err = require_superadmin()
     if err: return err
     m = Market.query.get_or_404(mid)
+    refs = {
+        "user(s)":     User.query.filter_by(market_id=mid).count(),
+        "product(s)":  Product.query.filter_by(market_id=mid).count(),
+        "category(ies)": Category.query.filter_by(market_id=mid).count(),
+        "sale(s)":     Sale.query.filter_by(market_id=mid).count(),
+        "order(s)":    Order.query.filter_by(market_id=mid).count(),
+    }
+    used = [f"{count} {label}" for label, count in refs.items() if count]
+    if used:
+        return jsonify({"error": f"This venue still has {', '.join(used)}. Reassign or remove them first."}), 400
     db.session.delete(m)
     db.session.commit()
     return jsonify({"message": "Market deleted"})
@@ -148,7 +159,12 @@ def all_users():
     err = require_superadmin()
     if err: return err
     users = User.query.order_by(User.id).all()
-    return jsonify([{"id": u.id, "name": u.name, "username": u.username, "role": u.role, "active": u.active} for u in users])
+    markets = {m.id: m.name for m in Market.query.all()}
+    return jsonify([{
+        "id": u.id, "name": u.name, "username": u.username, "role": u.role,
+        "active": u.active, "market_id": u.market_id,
+        "market_name": markets.get(u.market_id),
+    } for u in users])
 
 @superadmin_bp.route("/users", methods=["POST"])
 @jwt_required()
@@ -160,13 +176,27 @@ def create_user():
     username = d.get("username","").strip().lower()
     pin  = str(d.get("pin","")).strip()
     role = d.get("role","admin")
+    if role not in ("super_admin", "admin", "manager", "cashier", "waiter"):
+        return jsonify({"error": "Invalid role"}), 400
+    market_id = d.get("market_id")
+    if role == "super_admin":
+        market_id = None
+    else:
+        if market_id in ("", None):
+            return jsonify({"error": "Select a venue for this account"}), 400
+        try:
+            market_id = int(market_id)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid venue"}), 400
+        if not Market.query.get(market_id):
+            return jsonify({"error": "Venue not found"}), 400
     if not name or not username:
         return jsonify({"error": "Name and username required"}), 400
     if len(pin) != 4 or not pin.isdigit():
         return jsonify({"error": "PIN must be 4 digits"}), 400
     if User.query.filter(db.func.lower(User.username) == username).first():
         return jsonify({"error": "Username already exists"}), 400
-    u = User(name=name, username=username, password="", role=role, active=True, pin=pin)
+    u = User(name=name, username=username, password="", role=role, active=True, pin=pin, market_id=market_id)
     db.session.add(u)
     db.session.commit()
     return jsonify({"message": "User created", "id": u.id}), 201

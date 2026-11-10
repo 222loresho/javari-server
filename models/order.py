@@ -23,6 +23,7 @@ class Order(db.Model):
     confirmed_by    = db.Column(db.String(100))
     rejection_note  = db.Column(db.Text)
     created_at      = db.Column(db.DateTime, default=kenya_time)
+    market_id       = db.Column(db.Integer,  db.ForeignKey("markets.id"), nullable=True)
     items           = db.relationship("OrderItem", backref="order", lazy=True)
 
 class OrderItem(db.Model):

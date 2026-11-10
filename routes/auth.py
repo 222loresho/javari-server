@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models.user import User
+from models.market import Market
 from extensions import db
 
 auth_bp = Blueprint("auth", __name__)
@@ -16,9 +17,14 @@ def pin_login():
     if not user.pin or user.pin.strip() != pin:
         return jsonify({"error": "Wrong PIN"}), 401
     token = create_access_token(identity=str(user.id))
+    market = Market.query.get(user.market_id) if user.market_id else None
     return jsonify({
         "token": token,
-        "user": {"id": user.id, "name": user.name, "role": user.role},
+        "user": {
+            "id": user.id, "name": user.name, "role": user.role,
+            "market_id": user.market_id,
+            "market_name": market.name if market else None,
+        },
         "pin_length": len(user.pin or ""),
     }), 200
 

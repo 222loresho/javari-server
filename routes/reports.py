@@ -3,6 +3,7 @@ from flask_jwt_extended import jwt_required
 from models.sale import Sale, SaleItem
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
+from tenant import scoped
 
 reports_bp = Blueprint("reports", __name__)
 KENYA_TZ   = timezone(timedelta(hours=3))
@@ -13,7 +14,7 @@ def daily_report():
     date_str = request.args.get("date", datetime.now(KENYA_TZ).date().isoformat())
     try:    target = datetime.strptime(date_str, "%Y-%m-%d").date()
     except: return jsonify({"error": "Invalid date"}), 400
-    sales     = Sale.query.filter(func.date(Sale.created_at) == target).all()
+    sales     = scoped(Sale).filter(func.date(Sale.created_at) == target).all()
     total_rev = float(sum(s.total for s in sales))
     by_method = {}
     for s in sales:
@@ -49,19 +50,19 @@ def revenue_chart():
     period = request.args.get("period", "weekly")
     now    = datetime.now(KENYA_TZ)
     if period == "daily":
-        sales   = Sale.query.filter(func.date(Sale.created_at) == now.date()).all()
+        sales   = scoped(Sale).filter(func.date(Sale.created_at) == now.date()).all()
         buckets = {f"{h:02d}:00": 0 for h in range(24)}
         for s in sales: buckets[f"{s.created_at.hour:02d}:00"] += float(s.total)
     elif period == "weekly":
         days    = [(now - td(days=i)).date() for i in range(6,-1,-1)]
         buckets = {str(d): 0 for d in days}
-        for s in Sale.query.filter(func.date(Sale.created_at) >= str(days[0])).all():
+        for s in scoped(Sale).filter(func.date(Sale.created_at) >= str(days[0])).all():
             key = str(s.created_at.date())
             if key in buckets: buckets[key] += float(s.total)
     elif period == "monthly":
         days    = [(now - td(days=i)).date() for i in range(29,-1,-1)]
         buckets = {str(d): 0 for d in days}
-        for s in Sale.query.filter(func.date(Sale.created_at) >= str(days[0])).all():
+        for s in scoped(Sale).filter(func.date(Sale.created_at) >= str(days[0])).all():
             key = str(s.created_at.date())
             if key in buckets: buckets[key] += float(s.total)
     else:
@@ -69,7 +70,7 @@ def revenue_chart():
         for i in range(11,-1,-1):
             m = (now.replace(day=1) - td(days=i*30)).strftime("%Y-%m")
             buckets[m] = 0
-        for s in Sale.query.all():
+        for s in scoped(Sale).all():
             key = s.created_at.strftime("%Y-%m")
             if key in buckets: buckets[key] += float(s.total)
     data  = [{"label": k, "revenue": v} for k, v in buckets.items()]

@@ -1,50 +1,65 @@
-from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask import Blueprint, request, jsonify, abort
+from flask_jwt_extended import jwt_required
 from extensions import db
 from models.order import Order, OrderItem, kenya_time
 from models.sale import Sale, SaleItem
 from models.product import Product
-from models.user import User
+from tenant import current_user, scoped, in_venue
 
 orders_bp = Blueprint("orders", __name__)
+
+def load_order(oid):
+    order = Order.query.get_or_404(oid)
+    if not in_venue(order):
+        abort(404)
+    return order
+
+def items_in_venue(user, items):
+    for item in items:
+        product = Product.query.get(item["product_id"])
+        if not product or not in_venue(product, user):
+            return False
+    return True
 
 @orders_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_orders():
-    return jsonify([serialize(o) for o in Order.query.filter_by(status="pending").order_by(Order.created_at.desc()).all()])
+    return jsonify([serialize(o) for o in scoped(Order).filter_by(status="pending").order_by(Order.created_at.desc()).all()])
 
 @orders_bp.route("/submitted", methods=["GET"])
 @jwt_required()
 def get_submitted():
-    return jsonify([serialize(o) for o in Order.query.filter_by(status="submitted").order_by(Order.submitted_at.desc()).all()])
+    return jsonify([serialize(o) for o in scoped(Order).filter_by(status="submitted").order_by(Order.submitted_at.desc()).all()])
 
 @orders_bp.route("/confirmed", methods=["GET"])
 @jwt_required()
 def get_confirmed():
-    return jsonify([serialize(o) for o in Order.query.filter_by(status="confirmed").order_by(Order.confirmed_at.desc()).limit(50).all()])
+    return jsonify([serialize(o) for o in scoped(Order).filter_by(status="confirmed").order_by(Order.confirmed_at.desc()).limit(50).all()])
 
 @orders_bp.route("/completed", methods=["GET"])
 @jwt_required()
 def get_completed():
-    return jsonify([serialize(o) for o in Order.query.filter_by(status="completed").order_by(Order.created_at.desc()).limit(100).all()])
+    return jsonify([serialize(o) for o in scoped(Order).filter_by(status="completed").order_by(Order.created_at.desc()).limit(100).all()])
 
 @orders_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_order():
-    data     = request.json
-    identity = get_jwt_identity()
-    user     = User.query.get(identity)
+    data = request.json
+    user = current_user()
+    if not items_in_venue(user, data["items"]):
+        return jsonify({"error": "Unknown product in cart"}), 400
     last     = Order.query.order_by(Order.id.desc()).first()
     next_num = (last.id + 1) if last else 1
     order    = Order(
         table_name   = data["table_name"],
-        cashier_id   = identity,
+        cashier_id   = user.id,
         cashier_name = user.name,
         waiter_name  = data.get("waiter_name", user.name),
         status       = "pending",
         total        = data["total"],
         order_number = f"#{next_num:04d}",
-        created_at   = kenya_time()
+        created_at   = kenya_time(),
+        market_id    = user.market_id,
     )
     db.session.add(order)
     db.session.flush()
@@ -63,8 +78,10 @@ def create_order():
 @orders_bp.route("/<int:oid>", methods=["PUT"])
 @jwt_required()
 def update_order(oid):
-    order = Order.query.get_or_404(oid)
+    order = load_order(oid)
     data  = request.json
+    if not items_in_venue(current_user(), data["items"]):
+        return jsonify({"error": "Unknown product in cart"}), 400
     order.total = data["total"]
     OrderItem.query.filter_by(order_id=oid).delete()
     for item in data["items"]:
@@ -82,7 +99,7 @@ def update_order(oid):
 @orders_bp.route("/<int:oid>/submit", methods=["POST"])
 @jwt_required()
 def submit_order(oid):
-    order = Order.query.get_or_404(oid)
+    order = load_order(oid)
     data  = request.json
     order.status          = "submitted"
     order.payment_method  = data.get("payment_method", "cash")
@@ -94,18 +111,18 @@ def submit_order(oid):
 @orders_bp.route("/<int:oid>/confirm", methods=["POST"])
 @jwt_required()
 def confirm_order(oid):
-    identity = get_jwt_identity()
-    user     = User.query.get(identity)
-    order    = Order.query.get_or_404(oid)
-    total    = float(order.total)
+    user  = current_user()
+    order = load_order(oid)
+    total = float(order.total)
     sale = Sale(
-        cashier_id     = identity,
+        cashier_id     = user.id,
         cashier_name   = user.name,
         total          = total,
         amount_paid    = total,
         change_due     = 0,
         payment_method = order.payment_method or "cash",
-        created_at     = kenya_time()
+        created_at     = kenya_time(),
+        market_id      = order.market_id,
     )
     db.session.add(sale)
     db.session.flush()
@@ -119,7 +136,7 @@ def confirm_order(oid):
             subtotal     = item.subtotal
         ))
         product = Product.query.get(item.product_id)
-        if product:
+        if product and in_venue(product, user):
             product.stock = max(0, product.stock - item.quantity)
     order.status       = "confirmed"
     order.confirmed_at = kenya_time()
@@ -130,7 +147,7 @@ def confirm_order(oid):
 @orders_bp.route("/<int:oid>/reject", methods=["POST"])
 @jwt_required()
 def reject_order(oid):
-    order = Order.query.get_or_404(oid)
+    order = load_order(oid)
     data  = request.json
     order.status          = "pending"
     order.rejection_note  = data.get("note", "Payment rejected by cashier")
@@ -143,7 +160,7 @@ def reject_order(oid):
 @orders_bp.route("/<int:oid>", methods=["DELETE"])
 @jwt_required()
 def delete_order(oid):
-    order = Order.query.get_or_404(oid)
+    order = load_order(oid)
     OrderItem.query.filter_by(order_id=oid).delete()
     db.session.delete(order)
     db.session.commit()

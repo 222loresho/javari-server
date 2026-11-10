@@ -16,6 +16,7 @@ class Sale(db.Model):
     change_due     = db.Column(db.Numeric(10,2))
     payment_method = db.Column(db.String(20),    default="cash")
     created_at     = db.Column(db.DateTime,      default=kenya_time)
+    market_id      = db.Column(db.Integer,       db.ForeignKey("markets.id"), nullable=True)
     items          = db.relationship("SaleItem",  backref="sale", lazy=True)
 
 class SaleItem(db.Model):

@@ -63,20 +63,27 @@ from sqlalchemy import inspect, text
 
 def ensure_schema():
     with app.app_context():
-        inspector = inspect(db.engine)
-        if "users" not in inspector.get_table_names():
+        tables = set(inspect(db.engine).get_table_names())
+        if "users" not in tables:
             return
-        columns = {c["name"] for c in inspector.get_columns("users")}
-        if "manager_id" not in columns:
+        additions = [
+            ("users",      "manager_id", "INTEGER"),
+            ("products",   "image_url",  "VARCHAR(500)"),
+            ("users",      "market_id",  "INTEGER"),
+            ("categories", "market_id",  "INTEGER"),
+            ("products",   "market_id",  "INTEGER"),
+            ("sales",      "market_id",  "INTEGER"),
+            ("orders",     "market_id",  "INTEGER"),
+        ]
+        for table, column, ddl in additions:
+            if table not in tables:
+                continue
+            columns = {c["name"] for c in inspect(db.engine).get_columns(table)}
+            if column in columns:
+                continue
             with db.engine.begin() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN manager_id INTEGER"))
-            app.logger.info("Added users.manager_id column")
-        if "products" in inspector.get_table_names():
-            product_columns = {c["name"] for c in inspector.get_columns("products")}
-            if "image_url" not in product_columns:
-                with db.engine.begin() as conn:
-                    conn.execute(text("ALTER TABLE products ADD COLUMN image_url VARCHAR(500)"))
-                app.logger.info("Added products.image_url column")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+            app.logger.info("Added %s.%s column", table, column)
 
 ensure_schema()
 

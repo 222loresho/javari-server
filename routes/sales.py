@@ -1,10 +1,10 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from extensions import db
 from models.sale import Sale, SaleItem
 from models.product import Product
-from models.user import User
 from models.order import kenya_time
+from tenant import current_user, scoped, in_venue
 
 sales_bp = Blueprint("sales", __name__)
 
@@ -19,26 +19,33 @@ def get_sales():
         "change_due":     float(s.change_due),
         "payment_method": s.payment_method,
         "created_at":     s.created_at.isoformat()
-    } for s in Sale.query.order_by(Sale.created_at.desc()).all()])
+    } for s in scoped(Sale).order_by(Sale.created_at.desc()).all()])
 
 @sales_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_sale():
-    identity = get_jwt_identity()
-    user     = User.query.get(identity)
-    data     = request.get_json()
-    items    = data.get("items", [])
-    total    = sum(i["subtotal"] for i in items)
-    paid     = float(data.get("amount_paid", total))
-    change   = max(0, paid - total)
+    user  = current_user()
+    data  = request.get_json()
+    items = data.get("items", [])
+    products = {}
+    for item in items:
+        p = Product.query.get(item["product_id"])
+        if not p or not in_venue(p, user):
+            return jsonify({"error": f"Unknown product: {item.get('product_name', '')}"}), 400
+        products[item["product_id"]] = p
+
+    total  = sum(i["subtotal"] for i in items)
+    paid   = float(data.get("amount_paid", total))
+    change = max(0, paid - total)
     sale = Sale(
-        cashier_id     = identity,
+        cashier_id     = user.id,
         cashier_name   = user.name,
         total          = total,
         amount_paid    = paid,
         change_due     = change,
         payment_method = data.get("payment_method", "cash"),
-        created_at     = kenya_time()
+        created_at     = kenya_time(),
+        market_id      = user.market_id,
     )
     db.session.add(sale)
     db.session.flush()
@@ -51,7 +58,6 @@ def create_sale():
             price        = item["price"],
             subtotal     = item["subtotal"]
         ))
-        p = Product.query.get(item["product_id"])
-        if p: p.stock = max(0, p.stock - item["quantity"])
+        products[item["product_id"]].stock = max(0, products[item["product_id"]].stock - item["quantity"])
     db.session.commit()
     return jsonify({"message": "Sale created", "change_due": change}), 201

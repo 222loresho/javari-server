@@ -22,7 +22,7 @@ def pin_error(pin):
         return "PIN must be exactly 4 digits"
     return None
 
-def resolve_manager(value):
+def resolve_manager(value, market_id):
     """None means unassigned, False means invalid, otherwise a manager id."""
     if value in ("", None):
         return None
@@ -31,7 +31,7 @@ def resolve_manager(value):
     except (TypeError, ValueError):
         return False
     mgr = User.query.get(mid)
-    if not mgr or mgr.role != "manager":
+    if not mgr or mgr.role != "manager" or mgr.market_id != market_id:
         return False
     return mgr.id
 
@@ -52,10 +52,10 @@ def get_users():
     me, err = require_manager_or_admin()
     if err: return err
     if me.role == "admin":
-        rows = User.query.filter(User.role.in_(["manager"] + STAFF_ROLES)).order_by(User.name).all()
+        rows = User.query.filter(User.market_id == me.market_id, User.role.in_(["manager"] + STAFF_ROLES)).order_by(User.name).all()
     else:
-        rows = User.query.filter(User.manager_id == me.id, User.role.in_(STAFF_ROLES)).order_by(User.name).all()
-    managers = {u.id: u.name for u in User.query.filter(User.role == "manager").all()}
+        rows = User.query.filter(User.market_id == me.market_id, User.manager_id == me.id, User.role.in_(STAFF_ROLES)).order_by(User.name).all()
+    managers = {u.id: u.name for u in User.query.filter(User.market_id == me.market_id, User.role == "manager").all()}
     return jsonify([serialize(u, managers) for u in rows])
 
 @users_bp.route("/", methods=["POST"])
@@ -87,13 +87,13 @@ def create_user():
     if me.role == "manager":
         manager_id = me.id
     elif role in STAFF_ROLES:
-        manager_id = resolve_manager(data.get("manager_id"))
+        manager_id = resolve_manager(data.get("manager_id"), me.market_id)
         if manager_id is False:
             return jsonify({"error": "Selected manager not found"}), 400
 
     u = User(
         name=name, username=username, password="", role=role, active=True,
-        pin=pin, manager_id=manager_id,
+        pin=pin, manager_id=manager_id, market_id=me.market_id,
     )
     db.session.add(u)
     db.session.commit()
@@ -105,7 +105,7 @@ def update_user(uid):
     me, err = require_manager_or_admin()
     if err: return err
     u = User.query.get(uid)
-    if not u:
+    if not u or u.market_id != me.market_id:
         return jsonify({"error": "User not found"}), 404
     if u.role in PROTECTED:
         return jsonify({"error": "Admin accounts cannot be modified here"}), 403
@@ -125,7 +125,7 @@ def update_user(uid):
         if new_role not in ["manager"] + STAFF_ROLES:
             return jsonify({"error": "Role must be manager, cashier or waiter"}), 400
         if u.role == "manager" and new_role in STAFF_ROLES:
-            staff = User.query.filter_by(manager_id=u.id).count()
+            staff = User.query.filter(User.market_id == me.market_id, User.manager_id == u.id).count()
             if staff:
                 return jsonify({"error": f"{u.name} still manages {staff} staff member(s). Reassign them first."}), 400
         u.role = new_role
@@ -135,7 +135,7 @@ def update_user(uid):
         if u.role == "manager":
             u.manager_id = None
         else:
-            manager_id = resolve_manager(data.get("manager_id"))
+            manager_id = resolve_manager(data.get("manager_id"), me.market_id)
             if manager_id is False:
                 return jsonify({"error": "Selected manager not found"}), 400
             u.manager_id = manager_id
@@ -155,7 +155,7 @@ def delete_user(uid):
     me, err = require_manager_or_admin()
     if err: return err
     u = User.query.get(uid)
-    if not u:
+    if not u or u.market_id != me.market_id:
         return jsonify({"error": "User not found"}), 404
     if u.role in PROTECTED:
         return jsonify({"error": "Admin accounts cannot be deleted"}), 403
@@ -165,7 +165,7 @@ def delete_user(uid):
         return jsonify({"error": "You can only delete your own staff"}), 403
 
     if u.role == "manager":
-        staff = User.query.filter_by(manager_id=u.id).count()
+        staff = User.query.filter(User.market_id == me.market_id, User.manager_id == u.id).count()
         if staff:
             return jsonify({"error": f"{u.name} still manages {staff} staff member(s). Reassign or delete them first."}), 400
     try:

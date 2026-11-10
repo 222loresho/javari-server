@@ -60,6 +60,7 @@ from models.order import Order, OrderItem
 from models.market import Market
 
 from sqlalchemy import inspect, text
+from venue_codes import venue_code_for
 
 def ensure_schema():
     with app.app_context():
@@ -74,6 +75,7 @@ def ensure_schema():
             ("products",   "market_id",  "INTEGER"),
             ("sales",      "market_id",  "INTEGER"),
             ("orders",     "market_id",  "INTEGER"),
+            ("markets",    "code",       "VARCHAR(12)"),
         ]
         for table, column, ddl in additions:
             if table not in tables:
@@ -84,6 +86,50 @@ def ensure_schema():
             with db.engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
             app.logger.info("Added %s.%s column", table, column)
+        ensure_venue_codes()
+        ensure_username_scope()
+
+def ensure_venue_codes():
+    """Give every venue a short login code, e.g. Freetown → FRE."""
+    used = {m.code.upper() for m in Market.query.all() if m.code}
+    changed = False
+    for m in Market.query.order_by(Market.id).all():
+        if m.code:
+            continue
+        m.code = venue_code_for(m.name, used)
+        used.add(m.code)
+        changed = True
+        app.logger.info("Assigned venue code %s to %s", m.code, m.name)
+    if changed:
+        db.session.commit()
+
+def ensure_username_scope():
+    """Usernames are unique per venue (plus one platform namespace), not globally."""
+    if "users" not in set(inspect(db.engine).get_table_names()):
+        return
+    if db.engine.dialect.name != "postgresql":
+        return
+    try:
+        with db.engine.begin() as conn:
+            legacy = conn.execute(text(
+                "SELECT c.conname FROM pg_constraint c "
+                "JOIN pg_class t ON t.oid = c.conrelid "
+                "WHERE t.relname = 'users' AND c.contype = 'u' "
+                "AND pg_get_constraintdef(c.oid) = 'UNIQUE (username)'"
+            )).fetchall()
+            for (name,) in legacy:
+                conn.execute(text(f'ALTER TABLE users DROP CONSTRAINT IF EXISTS "{name}"'))
+                app.logger.info("Dropped global username constraint %s", name)
+            conn.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS ux_users_venue_username '
+                'ON users (market_id, lower(username)) WHERE market_id IS NOT NULL'
+            ))
+            conn.execute(text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS ux_users_platform_username '
+                'ON users (lower(username)) WHERE market_id IS NULL'
+            ))
+    except Exception:
+        app.logger.exception("Could not scope usernames per venue")
 
 ensure_schema()
 

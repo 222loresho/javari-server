@@ -7,11 +7,17 @@ from models.sale import Sale
 from models.order import Order
 from models.product import Product
 from models.category import Category
+from venue_codes import venue_code_for
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 
 superadmin_bp = Blueprint("superadmin", __name__)
 KENYA_TZ      = timezone(timedelta(hours=3))
+
+def venue_code_error(code):
+    if not (2 <= len(code) <= 8) or not code.isalnum():
+        return "Venue code must be 2–8 letters or digits"
+    return None
 
 def require_superadmin():
     uid  = get_jwt_identity()
@@ -34,9 +40,21 @@ def get_markets():
 def create_market():
     err = require_superadmin()
     if err: return err
-    d = request.get_json()
+    d    = request.get_json()
+    name = d.get("name","").strip()
+    if not name:
+        return jsonify({"error": "Venue name required"}), 400
+    code = (d.get("code") or "").strip().upper()
+    if code:
+        bad = venue_code_error(code)
+        if bad: return jsonify({"error": bad}), 400
+        if Market.query.filter(db.func.upper(Market.code) == code).first():
+            return jsonify({"error": "That venue code is already in use"}), 400
+    else:
+        code = venue_code_for(name, {m.code.upper() for m in Market.query.all() if m.code})
     m = Market(
-        name          = d.get("name","").strip(),
+        name          = name,
+        code          = code,
         location      = d.get("location",""),
         contact_name  = d.get("contact_name",""),
         contact_email = d.get("contact_email",""),
@@ -50,7 +68,7 @@ def create_market():
     )
     db.session.add(m)
     db.session.commit()
-    return jsonify({"message": "Market created", "id": m.id}), 201
+    return jsonify({"message": "Market created", "id": m.id, "code": m.code}), 201
 
 @superadmin_bp.route("/markets/<int:mid>", methods=["PUT"])
 @jwt_required()
@@ -59,6 +77,16 @@ def update_market(mid):
     if err: return err
     m = Market.query.get_or_404(mid)
     d = request.get_json()
+    if "code" in d:
+        code = (d["code"] or "").strip().upper()
+        if not code:
+            return jsonify({"error": "Venue code cannot be empty"}), 400
+        bad = venue_code_error(code)
+        if bad: return jsonify({"error": bad}), 400
+        clash = Market.query.filter(db.func.upper(Market.code) == code, Market.id != m.id).first()
+        if clash:
+            return jsonify({"error": "That venue code is already in use"}), 400
+        m.code = code
     for field in ["name","location","contact_name","contact_email","contact_phone","plan","monthly_fee","currency","status","api_url","notes"]:
         if field in d: setattr(m, field, d[field])
     if "last_payment" in d and d["last_payment"]:
@@ -194,8 +222,8 @@ def create_user():
         return jsonify({"error": "Name and username required"}), 400
     if len(pin) != 4 or not pin.isdigit():
         return jsonify({"error": "PIN must be 4 digits"}), 400
-    if User.query.filter(db.func.lower(User.username) == username).first():
-        return jsonify({"error": "Username already exists"}), 400
+    if User.query.filter(User.market_id == market_id, db.func.lower(User.username) == username).first():
+        return jsonify({"error": "That username is already used in this venue"}), 400
     u = User(name=name, username=username, password="", role=role, active=True, pin=pin, market_id=market_id)
     db.session.add(u)
     db.session.commit()
@@ -205,6 +233,7 @@ def serialize_market(m):
     return {
         "id":            m.id,
         "name":          m.name,
+        "code":          m.code,
         "location":      m.location,
         "contact_name":  m.contact_name,
         "contact_email": m.contact_email,

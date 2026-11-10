@@ -8,11 +8,34 @@ auth_bp = Blueprint("auth", __name__)
 
 @auth_bp.route("/pin-login", methods=["POST"])
 def pin_login():
-    data     = request.get_json()
+    data     = request.get_json() or {}
+    code     = (data.get("code") or "").strip().upper()
     username = data.get("username", "").strip().lower()
-    pin      = data.get("pin", "").strip()
-    user     = User.query.filter(db.func.lower(User.username) == username).first()
-    if not user or not user.active:
+    pin      = str(data.get("pin", "")).strip()
+
+    if not username:
+        return jsonify({"error": "Enter your username"}), 400
+
+    if code:
+        market = Market.query.filter(db.func.upper(Market.code) == code).first()
+        if not market:
+            return jsonify({"error": "Unknown venue code"}), 404
+        user = User.query.filter(
+            User.market_id == market.id,
+            db.func.lower(User.username) == username,
+        ).first()
+    else:
+        market = None
+        user = User.query.filter(
+            User.market_id.is_(None),
+            db.func.lower(User.username) == username,
+        ).first()
+
+    if not user:
+        if not code and User.query.filter(db.func.lower(User.username) == username).first():
+            return jsonify({"error": "Enter your venue code"}), 403
+        return jsonify({"error": "User not found or inactive"}), 401
+    if not user.active:
         return jsonify({"error": "User not found or inactive"}), 401
     if not user.pin or user.pin.strip() != pin:
         return jsonify({"error": "Wrong PIN"}), 401
@@ -29,6 +52,7 @@ def pin_login():
             "id": user.id, "name": user.name, "role": user.role,
             "market_id": user.market_id,
             "market_name": market.name if market else None,
+            "market_code": market.code if market else None,
         },
         "pin_length": len(user.pin or ""),
     }), 200

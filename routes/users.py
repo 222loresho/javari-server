@@ -83,8 +83,8 @@ def create_user():
 
     err = pin_error(pin)
     if err: return jsonify({"error": err}), 400
-    if User.query.filter(db.func.lower(User.username) == username).first():
-        return jsonify({"error": "Username already exists"}), 400
+    if User.query.filter(User.market_id == me.market_id, db.func.lower(User.username) == username).first():
+        return jsonify({"error": "That username is already used in this venue"}), 400
 
     manager_id = None if role == "manager" else me.id
 

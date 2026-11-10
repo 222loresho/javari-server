@@ -9,6 +9,7 @@ class Market(db.Model):
     __tablename__ = "markets"
     id            = db.Column(db.Integer,       primary_key=True)
     name          = db.Column(db.String(100),   nullable=False)
+    code          = db.Column(db.String(12))
     location      = db.Column(db.String(200))
     contact_name  = db.Column(db.String(100))
     contact_email = db.Column(db.String(100))

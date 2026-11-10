@@ -14,11 +14,6 @@ from sqlalchemy import func
 superadmin_bp = Blueprint("superadmin", __name__)
 KENYA_TZ      = timezone(timedelta(hours=3))
 
-def venue_code_error(code):
-    if not (2 <= len(code) <= 8) or not code.isalnum():
-        return "Venue code must be 2–8 letters or digits"
-    return None
-
 def require_superadmin():
     uid  = get_jwt_identity()
     user = User.query.get(uid)
@@ -44,14 +39,7 @@ def create_market():
     name = d.get("name","").strip()
     if not name:
         return jsonify({"error": "Venue name required"}), 400
-    code = (d.get("code") or "").strip().upper()
-    if code:
-        bad = venue_code_error(code)
-        if bad: return jsonify({"error": bad}), 400
-        if Market.query.filter(db.func.upper(Market.code) == code).first():
-            return jsonify({"error": "That venue code is already in use"}), 400
-    else:
-        code = venue_code_for(name, {m.code.upper() for m in Market.query.all() if m.code})
+    code = venue_code_for(name, {m.code.upper() for m in Market.query.all() if m.code})
     m = Market(
         name          = name,
         code          = code,
@@ -77,16 +65,8 @@ def update_market(mid):
     if err: return err
     m = Market.query.get_or_404(mid)
     d = request.get_json()
-    if "code" in d:
-        code = (d["code"] or "").strip().upper()
-        if not code:
-            return jsonify({"error": "Venue code cannot be empty"}), 400
-        bad = venue_code_error(code)
-        if bad: return jsonify({"error": bad}), 400
-        clash = Market.query.filter(db.func.upper(Market.code) == code, Market.id != m.id).first()
-        if clash:
-            return jsonify({"error": "That venue code is already in use"}), 400
-        m.code = code
+    if "code" in d and (d["code"] or "").strip().upper() != (m.code or ""):
+        return jsonify({"error": "Venue codes are permanent and cannot be changed"}), 400
     for field in ["name","location","contact_name","contact_email","contact_phone","plan","monthly_fee","currency","status","api_url","notes"]:
         if field in d: setattr(m, field, d[field])
     if "last_payment" in d and d["last_payment"]:

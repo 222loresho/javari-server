@@ -8,6 +8,7 @@ from models.order import Order
 from models.product import Product
 from models.category import Category
 from venue_codes import venue_code_for
+from pin_auth import hash_pin
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 
@@ -204,7 +205,8 @@ def create_user():
         return jsonify({"error": "PIN must be 4 digits"}), 400
     if User.query.filter(User.market_id == market_id, db.func.lower(User.username) == username).first():
         return jsonify({"error": "That username is already used in this venue"}), 400
-    u = User(name=name, username=username, password="", role=role, active=True, pin=pin, market_id=market_id)
+    u = User(name=name, username=username, password="", role=role, active=True,
+             pin=hash_pin(pin), pin_length=4, market_id=market_id)
     db.session.add(u)
     db.session.commit()
     return jsonify({"message": "User created", "id": u.id}), 201

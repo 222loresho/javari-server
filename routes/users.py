@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models.user import User
+from pin_auth import hash_pin
 
 users_bp = Blueprint("users", __name__)
 
@@ -92,7 +93,7 @@ def create_user():
 
     u = User(
         name=name, username=username, password="", role=role, active=True,
-        pin=pin, manager_id=manager_id, market_id=me.market_id,
+        pin=hash_pin(pin), pin_length=4, manager_id=manager_id, market_id=me.market_id,
     )
     db.session.add(u)
     db.session.commit()
@@ -144,7 +145,8 @@ def update_user(uid):
         pin = str(data["pin"]).strip()
         err = pin_error(pin)
         if err: return jsonify({"error": err}), 400
-        u.pin = pin
+        u.pin = hash_pin(pin)
+        u.pin_length = 4
     if u.role == "manager":
         u.manager_id = None
     elif u.role in STAFF_ROLES and not u.manager_id:

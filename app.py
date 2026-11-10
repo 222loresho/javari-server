@@ -64,6 +64,7 @@ from models.market import Market
 
 from sqlalchemy import inspect, text
 from venue_codes import venue_code_for
+from pin_auth import hash_pin, is_hashed
 
 def ensure_schema():
     with app.app_context():
@@ -79,6 +80,7 @@ def ensure_schema():
             ("sales",      "market_id",  "INTEGER"),
             ("orders",     "market_id",  "INTEGER"),
             ("markets",    "code",       "VARCHAR(12)"),
+            ("users",      "pin_length", "INTEGER"),
         ]
         for table, column, ddl in additions:
             if table not in tables:
@@ -91,6 +93,7 @@ def ensure_schema():
             app.logger.info("Added %s.%s column", table, column)
         ensure_venue_codes()
         ensure_username_scope()
+        ensure_pin_hashes()
 
 def ensure_venue_codes():
     """Give every venue a short login code, e.g. Freetown → FRE."""
@@ -142,6 +145,32 @@ def ensure_username_scope():
             ))
     except Exception:
         app.logger.exception("Could not scope usernames per venue")
+
+def ensure_pin_hashes():
+    """Replace plaintext PINs with slow hashes; the column must be wide enough."""
+    if db.engine.dialect.name == "postgresql":
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(text("ALTER TABLE users ALTER COLUMN pin TYPE VARCHAR(255)"))
+        except Exception:
+            app.logger.exception("Could not widen users.pin; keeping plaintext PINs")
+            return
+    changed = False
+    for u in User.query.all():
+        stored = (u.pin or "").strip()
+        if not stored:
+            continue
+        hashed = is_hashed(stored)
+        if u.pin_length is None:
+            u.pin_length = 4 if hashed else len(stored)
+            changed = True
+        if hashed:
+            continue
+        u.pin = hash_pin(stored)
+        changed = True
+    if changed:
+        db.session.commit()
+        app.logger.info("Stored PINs are now hashed")
 
 ensure_schema()
 

@@ -1,10 +1,9 @@
-import hmac
-
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from models.user import User
 from models.market import Market
 from extensions import db
+from pin_auth import burn_check, hash_pin, is_hashed, pin_matches
 from login_throttle import check as throttle_check, fail as throttle_fail, reset as throttle_reset
 
 auth_bp = Blueprint("auth", __name__)
@@ -17,8 +16,19 @@ def _ip_key():
 
 
 def _pin_matches(user, pin):
-    stored = (user.pin or "").strip()
-    return bool(stored) and hmac.compare_digest(stored.encode(), pin.encode())
+    return pin_matches(user.pin, pin)
+
+
+def _upgrade_pin(user, pin):
+    """Re-hash legacy plaintext PINs the first time they are used."""
+    if is_hashed(user.pin or ""):
+        return
+    user.pin = hash_pin(pin)
+    user.pin_length = len(pin)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _too_many(retry):
@@ -53,6 +63,8 @@ def pin_login():
                 db.func.lower(User.username) == username,
             ).first()
         if not user or not user.active or not _pin_matches(user, pin):
+            if not user:
+                burn_check(pin)
             throttle_fail(user_key, ip_key)
             return jsonify({"error": BAD_LOGIN}), 401
     else:
@@ -62,6 +74,8 @@ def pin_login():
         ).all()
         hits = [u for u in matches if _pin_matches(u, pin)]
         if not hits:
+            if not matches:
+                burn_check(pin)
             throttle_fail(user_key, ip_key)
             return jsonify({"error": BAD_LOGIN}), 401
         if len(hits) > 1:
@@ -75,6 +89,7 @@ def pin_login():
             return jsonify({"error": "No manager assigned yet. Ask your admin."}), 403
 
     throttle_reset(user_key)
+    _upgrade_pin(user, pin)
     token = create_access_token(identity=str(user.id))
     market = Market.query.get(user.market_id) if user.market_id else None
     return jsonify({
@@ -85,7 +100,7 @@ def pin_login():
             "market_name": market.name if market else None,
             "market_code": market.code if market else None,
         },
-        "pin_length": len(user.pin or ""),
+        "pin_length": user.pin_length or 4,
     }), 200
 
 
@@ -127,7 +142,8 @@ def change_pin():
         return jsonify({"error": "PIN must be exactly 4 digits"}), 400
     if new_pin == current:
         return jsonify({"error": "New PIN must be different"}), 400
-    user.pin = new_pin
+    user.pin = hash_pin(new_pin)
+    user.pin_length = 4
     db.session.commit()
     throttle_reset(key)
     return jsonify({"message": "PIN updated", "pin_length": 4})

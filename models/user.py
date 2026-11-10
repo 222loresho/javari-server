@@ -8,6 +8,7 @@ class User(db.Model):
     password   = db.Column(db.String(255), nullable=False)
     role       = db.Column(db.String(20),  default="cashier")
     active     = db.Column(db.Boolean,     default=True)
-    pin        = db.Column(db.String(10),  default="1234")
+    pin        = db.Column(db.String(255))
+    pin_length = db.Column(db.Integer,     default=4)
     market_id  = db.Column(db.Integer, db.ForeignKey("markets.id"), nullable=True)
     manager_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)

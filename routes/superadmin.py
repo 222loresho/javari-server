@@ -176,8 +176,8 @@ def create_user():
     username = d.get("username","").strip().lower()
     pin  = str(d.get("pin","")).strip()
     role = d.get("role","admin")
-    if role not in ("super_admin", "admin", "manager", "cashier", "waiter"):
-        return jsonify({"error": "Invalid role"}), 400
+    if role not in ("admin", "super_admin"):
+        return jsonify({"error": "Super admins create admins for a venue"}), 400
     market_id = d.get("market_id")
     if role == "super_admin":
         market_id = None

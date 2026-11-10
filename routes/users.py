@@ -73,23 +73,20 @@ def create_user():
         return jsonify({"error": "Name and username required"}), 400
 
     if me.role == "admin":
-        if role not in ["manager"] + STAFF_ROLES:
-            return jsonify({"error": "Role must be manager, cashier or waiter"}), 400
+        if role != "manager":
+            return jsonify({"error": "Admins add managers; managers add their staff"}), 403
     elif role not in STAFF_ROLES:
         return jsonify({"error": "Managers can only create cashier or waiter accounts"}), 403
+
+    if not me.market_id:
+        return jsonify({"error": "Your account has no venue yet. Ask the super admin."}), 400
 
     err = pin_error(pin)
     if err: return jsonify({"error": err}), 400
     if User.query.filter(db.func.lower(User.username) == username).first():
         return jsonify({"error": "Username already exists"}), 400
 
-    manager_id = None
-    if me.role == "manager":
-        manager_id = me.id
-    elif role in STAFF_ROLES:
-        manager_id = resolve_manager(data.get("manager_id"), me.market_id)
-        if manager_id is False:
-            return jsonify({"error": "Selected manager not found"}), 400
+    manager_id = None if role == "manager" else me.id
 
     u = User(
         name=name, username=username, password="", role=role, active=True,
@@ -146,6 +143,11 @@ def update_user(uid):
         err = pin_error(pin)
         if err: return jsonify({"error": err}), 400
         u.pin = pin
+    if u.role == "manager":
+        u.manager_id = None
+    elif u.role in STAFF_ROLES and not u.manager_id:
+        db.session.rollback()
+        return jsonify({"error": "Assign this staff member to a manager"}), 400
     db.session.commit()
     return jsonify({"message": "User updated"})
 

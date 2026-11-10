@@ -16,6 +16,11 @@ def pin_login():
         return jsonify({"error": "User not found or inactive"}), 401
     if not user.pin or user.pin.strip() != pin:
         return jsonify({"error": "Wrong PIN"}), 401
+    if user.role != "super_admin":
+        if not user.market_id:
+            return jsonify({"error": "No venue assigned to this account. Ask the super admin."}), 403
+        if user.role in ("cashier", "waiter") and not user.manager_id:
+            return jsonify({"error": "No manager assigned yet. Ask your admin."}), 403
     token = create_access_token(identity=str(user.id))
     market = Market.query.get(user.market_id) if user.market_id else None
     return jsonify({

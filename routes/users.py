@@ -66,10 +66,10 @@ def get_users():
 def create_user():
     me, err = require_manager_or_admin()
     if err: return err
-    data     = request.get_json() or {}
-    name     = data.get("name", "").strip()
-    username = data.get("username", "").strip().lower()
-    pin      = str(data.get("pin", "")).strip()
+    data     = request.get_json(silent=True) or {}
+    name     = str(data.get("name") or "").strip()[:100]
+    username = str(data.get("username") or "").strip().lower()[:50]
+    pin      = str(data.get("pin") or "").strip()
     role     = data.get("role", "")
 
     if not name or not username:
@@ -112,9 +112,9 @@ def update_user(uid):
     if me.role == "manager" and not (u.manager_id == me.id and u.role in STAFF_ROLES):
         return jsonify({"error": "You can only manage your own staff"}), 403
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     if "name" in data:
-        name = data["name"].strip()
+        name = str(data.get("name") or "").strip()[:100]
         if not name:
             return jsonify({"error": "Name cannot be empty"}), 400
         u.name = name

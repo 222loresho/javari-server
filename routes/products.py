@@ -77,7 +77,7 @@ def create_product():
     if not _category_ok(cat, user):
         return jsonify({"error": "Unknown category"}), 400
     p = Product(name=name, price=price, stock=stock,
-                category_id=cat, image_url=data.get("image_url") or None,
+                category_id=cat, image_url=str(data.get("image_url") or "")[:500] or None,
                 market_id=user.market_id)
     db.session.add(p)
     db.session.commit()
@@ -115,7 +115,7 @@ def update_product(pid):
             return jsonify({"error": "Unknown category"}), 400
         p.category_id = cat
     if "image_url" in data:
-        p.image_url = data.get("image_url") or None
+        p.image_url = str(data.get("image_url") or "")[:500] or None
     db.session.commit()
     return jsonify({"message": "Product updated"})
 

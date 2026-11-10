@@ -21,12 +21,13 @@ def required_env(name):
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
-default_origins = [
-    "https://222loresho.github.io",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-]
+default_origins = ["https://222loresho.github.io"]
+if os.environ.get("RENDER") != "true" and os.environ.get("FLASK_ENV") != "production":
+    default_origins += [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+    ]
 extra_origins = [
     origin.strip()
     for origin in os.environ.get("FRONTEND_ORIGINS", "").split(",")

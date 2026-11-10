@@ -181,8 +181,8 @@ def create_user():
     err = require_superadmin()
     if err: return err
     d    = request.get_json(silent=True) or {}
-    name = str(d.get("name") or "").strip()
-    username = str(d.get("username") or "").strip().lower()
+    name = str(d.get("name") or "").strip()[:100]
+    username = str(d.get("username") or "").strip().lower()[:50]
     pin  = str(d.get("pin") or "").strip()
     role = d.get("role","admin")
     if role not in ("admin", "super_admin"):

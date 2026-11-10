@@ -24,21 +24,24 @@ def pin_login():
             User.market_id == market.id,
             db.func.lower(User.username) == username,
         ).first()
+        if not user or not user.active:
+            return jsonify({"error": "User not found or inactive"}), 401
+        if not user.pin or user.pin.strip() != pin:
+            return jsonify({"error": "Wrong PIN"}), 401
     else:
-        market = None
-        user = User.query.filter(
-            User.market_id.is_(None),
+        matches = User.query.filter(
+            User.active.is_(True),
             db.func.lower(User.username) == username,
-        ).first()
+        ).all()
+        if not matches:
+            return jsonify({"error": "User not found or inactive"}), 401
+        hits = [u for u in matches if u.pin and u.pin.strip() == pin]
+        if not hits:
+            return jsonify({"error": "Wrong PIN"}), 401
+        if len(hits) > 1:
+            return jsonify({"error": "This username and PIN exist in two venues. Ask your admin to change one PIN."}), 409
+        user = hits[0]
 
-    if not user:
-        if not code and User.query.filter(db.func.lower(User.username) == username).first():
-            return jsonify({"error": "Enter your venue code"}), 403
-        return jsonify({"error": "User not found or inactive"}), 401
-    if not user.active:
-        return jsonify({"error": "User not found or inactive"}), 401
-    if not user.pin or user.pin.strip() != pin:
-        return jsonify({"error": "Wrong PIN"}), 401
     if user.role != "super_admin":
         if not user.market_id:
             return jsonify({"error": "No venue assigned to this account. Ask the super admin."}), 403

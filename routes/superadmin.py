@@ -9,6 +9,8 @@ from models.product import Product
 from models.category import Category
 from venue_codes import venue_code_for
 from pin_auth import hash_pin
+from audit import log as audit_log
+from models.audit_log import AuditLog
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 
@@ -57,6 +59,7 @@ def create_market():
     )
     db.session.add(m)
     db.session.commit()
+    audit_log("market.create", f"{m.name} ({m.code})")
     return jsonify({"message": "Market created", "id": m.id, "code": m.code}), 201
 
 @superadmin_bp.route("/markets/<int:mid>", methods=["PUT"])
@@ -75,6 +78,7 @@ def update_market(mid):
     if "next_payment" in d and d["next_payment"]:
         m.next_payment = datetime.fromisoformat(d["next_payment"])
     db.session.commit()
+    audit_log("market.update", f"{m.name} ({m.code}): {', '.join(sorted(d.keys())) or 'no changes'}")
     return jsonify({"message": "Market updated"})
 
 @superadmin_bp.route("/markets/<int:mid>", methods=["DELETE"])
@@ -93,8 +97,10 @@ def delete_market(mid):
     used = [f"{count} {label}" for label, count in refs.items() if count]
     if used:
         return jsonify({"error": f"This venue still has {', '.join(used)}. Reassign or remove them first."}), 400
+    name, code = m.name, m.code
     db.session.delete(m)
     db.session.commit()
+    audit_log("market.delete", f"{name} ({code})")
     return jsonify({"message": "Market deleted"})
 
 # ── Dashboard analytics ───────────────────────────────────────────────────────
@@ -209,7 +215,24 @@ def create_user():
              pin=hash_pin(pin), pin_length=4, market_id=market_id)
     db.session.add(u)
     db.session.commit()
+    audit_log("user.create", f"{role} {username} in venue {market_id}")
     return jsonify({"message": "User created", "id": u.id}), 201
+
+@superadmin_bp.route("/audit", methods=["GET"])
+@jwt_required()
+def audit_trail():
+    err = require_superadmin()
+    if err: return err
+    rows = AuditLog.query.order_by(AuditLog.id.desc()).limit(200).all()
+    return jsonify([{
+        "id":         a.id,
+        "actor_id":   a.actor_id,
+        "actor_name": a.actor_name,
+        "action":     a.action,
+        "detail":     a.detail,
+        "ip":         a.ip,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    } for a in rows])
 
 def serialize_market(m):
     return {

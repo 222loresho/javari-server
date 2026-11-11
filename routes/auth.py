@@ -4,15 +4,18 @@ from models.user import User
 from models.market import Market
 from extensions import db
 from pin_auth import burn_check, hash_pin, is_hashed, pin_matches
-from login_throttle import check as throttle_check, fail as throttle_fail, reset as throttle_reset
+from login_throttle import (
+    check_login,
+    record_login,
+    check_stepup,
+    fail_stepup,
+    reset_stepup,
+)
+from audit import log as audit_log
 
 auth_bp = Blueprint("auth", __name__)
 
 BAD_LOGIN = "Wrong username or PIN"
-
-
-def _ip_key():
-    return "ip:" + (request.remote_addr or "unknown")
 
 
 def _pin_matches(user, pin):
@@ -48,9 +51,8 @@ def pin_login():
     if not username:
         return jsonify({"error": "Enter your username"}), 400
 
-    user_key = "user:" + username
-    ip_key   = _ip_key()
-    retry    = throttle_check(user_key, ip_key)
+    user_key = username
+    retry    = check_login(username, request.remote_addr)
     if retry:
         return _too_many(retry)
 
@@ -65,7 +67,7 @@ def pin_login():
         if not user or not user.active or not _pin_matches(user, pin):
             if not user:
                 burn_check(pin)
-            throttle_fail(user_key, ip_key)
+            record_login(user_key, request.remote_addr, False)
             return jsonify({"error": BAD_LOGIN}), 401
     else:
         matches = User.query.filter(
@@ -76,7 +78,7 @@ def pin_login():
         if not hits:
             if not matches:
                 burn_check(pin)
-            throttle_fail(user_key, ip_key)
+            record_login(user_key, request.remote_addr, False)
             return jsonify({"error": BAD_LOGIN}), 401
         if len(hits) > 1:
             return jsonify({"error": "This username and PIN exist in two venues. Ask your admin to change one PIN."}), 409
@@ -84,11 +86,13 @@ def pin_login():
 
     if user.role != "super_admin":
         if not user.market_id:
+            record_login(user_key, request.remote_addr, False)
             return jsonify({"error": "No venue assigned to this account. Ask the super admin."}), 403
         if user.role in ("cashier", "waiter") and not user.manager_id:
+            record_login(user_key, request.remote_addr, False)
             return jsonify({"error": "No manager assigned yet. Ask your admin."}), 403
 
-    throttle_reset(user_key)
+    record_login(user_key, request.remote_addr, True)
     _upgrade_pin(user, pin)
     token = create_access_token(identity=str(user.id))
     market = Market.query.get(user.market_id) if user.market_id else None
@@ -112,13 +116,13 @@ def verify_pin():
     if not user:
         return jsonify({"valid": False}), 404
     key   = f"pincheck:{user.id}"
-    retry = throttle_check(key)
+    retry = check_stepup(key)
     if retry:
         return _too_many(retry)
     if _pin_matches(user, str(data.get("pin") or "").strip()[:16]):
-        throttle_reset(key)
+        reset_stepup(key)
         return jsonify({"valid": True})
-    throttle_fail(key)
+    fail_stepup(key)
     return jsonify({"valid": False})
 
 
@@ -132,11 +136,11 @@ def change_pin():
     if not user:
         return jsonify({"error": "User not found"}), 404
     key   = f"pincheck:{user.id}"
-    retry = throttle_check(key)
+    retry = check_stepup(key)
     if retry:
         return _too_many(retry)
     if not _pin_matches(user, current):
-        throttle_fail(key)
+        fail_stepup(key)
         return jsonify({"error": "Current PIN is incorrect"}), 401
     if len(new_pin) != 4 or not new_pin.isdigit():
         return jsonify({"error": "PIN must be exactly 4 digits"}), 400
@@ -145,5 +149,6 @@ def change_pin():
     user.pin = hash_pin(new_pin)
     user.pin_length = 4
     db.session.commit()
-    throttle_reset(key)
+    reset_stepup(key)
+    audit_log("pin.change", f"{user.username} changed their own PIN", user)
     return jsonify({"message": "PIN updated", "pin_length": 4})

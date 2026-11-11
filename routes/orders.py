@@ -6,6 +6,7 @@ from models.sale import Sale, SaleItem
 from models.product import Product
 from line_items import build_lines
 from tenant import current_user, scoped, in_venue
+from audit import log as audit_log
 
 orders_bp = Blueprint("orders", __name__)
 
@@ -181,13 +182,14 @@ def confirm_order(oid):
     order.confirmed_at = kenya_time()
     order.confirmed_by = user.name
     db.session.commit()
+    audit_log("order.confirm", f"{order.order_number} {order.table_name} total {total:.2f}", user)
     return jsonify({"message": "Order confirmed", "change_due": 0})
 
 
 @orders_bp.route("/<int:oid>/reject", methods=["POST"])
 @jwt_required()
 def reject_order(oid):
-    _, err = _require_cashier()
+    user, err = _require_cashier()
     if err: return err
     order = load_order(oid)
     if order.status != "submitted":
@@ -199,6 +201,7 @@ def reject_order(oid):
     order.payment_details = None
     order.submitted_at    = None
     db.session.commit()
+    audit_log("order.reject", f"{order.order_number} {order.table_name}: {order.rejection_note}", user)
     return jsonify({"message": "Order rejected"})
 
 
@@ -210,9 +213,11 @@ def delete_order(oid):
     order = load_order(oid)
     if order.status != "pending" and user.role not in ("admin", "super_admin"):
         return jsonify({"error": "Only an admin can cancel a submitted or confirmed order"}), 403
+    number, table, status = order.order_number, order.table_name, order.status
     OrderItem.query.filter_by(order_id=oid).delete()
     db.session.delete(order)
     db.session.commit()
+    audit_log("order.delete", f"{number} {table} ({status})", user)
     return jsonify({"message": "Order cancelled"})
 
 

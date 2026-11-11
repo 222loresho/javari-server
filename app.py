@@ -62,6 +62,8 @@ from models.product import Product
 from models.sale import Sale, SaleItem
 from models.order import Order, OrderItem
 from models.market import Market
+from models.login_event import LoginEvent
+from models.audit_log import AuditLog
 
 from sqlalchemy import inspect, text
 from venue_codes import venue_code_for
@@ -69,6 +71,7 @@ from pin_auth import hash_pin, is_hashed
 
 def ensure_schema():
     with app.app_context():
+        db.create_all()
         tables = set(inspect(db.engine).get_table_names())
         if "users" not in tables:
             return

@@ -3,6 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from extensions import db
 from models.user import User
 from pin_auth import hash_pin
+from audit import log as audit_log
 
 users_bp = Blueprint("users", __name__)
 
@@ -97,6 +98,7 @@ def create_user():
     )
     db.session.add(u)
     db.session.commit()
+    audit_log("user.create", f"{role} {username} in venue {me.market_id}", me)
     return jsonify({"message": "User created", "id": u.id}), 201
 
 @users_bp.route("/<int:uid>", methods=["PUT"])
@@ -153,6 +155,8 @@ def update_user(uid):
         db.session.rollback()
         return jsonify({"error": "Assign this staff member to a manager"}), 400
     db.session.commit()
+    changed = [k for k in ("name", "role", "manager_id", "active", "pin") if k in data]
+    audit_log("user.update", f"{u.username}: {', '.join(changed) or 'no changes'}", me)
     return jsonify({"message": "User updated"})
 
 @users_bp.route("/<int:uid>", methods=["DELETE"])
@@ -174,10 +178,12 @@ def delete_user(uid):
         staff = User.query.filter(User.market_id == me.market_id, User.manager_id == u.id).count()
         if staff:
             return jsonify({"error": f"{u.name} still manages {staff} staff member(s). Reassign or delete them first."}), 400
+    username, role = u.username, u.role
     try:
         db.session.delete(u)
         db.session.commit()
-        return jsonify({"message": "User deleted"})
     except Exception:
         db.session.rollback()
         return jsonify({"error": "Cannot delete user with existing orders. Deactivate them instead."}), 400
+    audit_log("user.delete", f"{username} ({role})", me)
+    return jsonify({"message": "User deleted"})

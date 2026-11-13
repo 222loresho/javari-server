@@ -1,0 +1,16 @@
+name: Keep the API awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the public product list
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 120 https://javari-server.onrender.com/api/products/)
+          echo "HTTP $code"
+          test "$code" = "200"

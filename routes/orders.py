@@ -57,7 +57,7 @@ def get_confirmed():
 @orders_bp.route("/completed", methods=["GET"])
 @jwt_required()
 def get_completed():
-    return jsonify([serialize(o) for o in scoped(Order).filter_by(status="completed").order_by(Order.created_at.desc()).limit(100).all()])
+    return jsonify([serialize(o) for o in scoped(Order).filter_by(status="confirmed").order_by(Order.confirmed_at.desc()).limit(100).all()])
 
 
 @orders_bp.route("/", methods=["POST"])
@@ -113,6 +113,10 @@ def update_order(oid):
     lines, total, err = build_lines(user, data.get("items"))
     if err:
         return jsonify({"error": err}), 400
+    existing  = {item.product_id for item in order.items}
+    submitted = {line["product"].id for line in lines}
+    if existing - submitted and user.role not in ("admin", "super_admin"):
+        return jsonify({"error": "Only an admin can remove items from a saved table"}), 403
     order.total = total
     OrderItem.query.filter_by(order_id=oid).delete()
     for line in lines:
@@ -211,8 +215,8 @@ def delete_order(oid):
     user, err = _require_staff()
     if err: return err
     order = load_order(oid)
-    if order.status != "pending" and user.role not in ("admin", "super_admin"):
-        return jsonify({"error": "Only an admin can cancel a submitted or confirmed order"}), 403
+    if user.role not in ("admin", "super_admin"):
+        return jsonify({"error": "Only an admin can cancel an order"}), 403
     number, table, status = order.order_number, order.table_name, order.status
     OrderItem.query.filter_by(order_id=oid).delete()
     db.session.delete(order)

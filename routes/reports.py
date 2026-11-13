@@ -4,6 +4,7 @@ from models.sale import Sale, SaleItem
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import func
 from tenant import scoped
+from roles import require, REPORT_ROLES
 
 reports_bp = Blueprint("reports", __name__)
 KENYA_TZ   = timezone(timedelta(hours=3))
@@ -11,6 +12,8 @@ KENYA_TZ   = timezone(timedelta(hours=3))
 @reports_bp.route("/daily", methods=["GET"])
 @jwt_required()
 def daily_report():
+    _, err = require(*REPORT_ROLES)
+    if err: return err
     date_str = request.args.get("date", datetime.now(KENYA_TZ).date().isoformat())
     try:    target = datetime.strptime(date_str, "%Y-%m-%d").date()
     except: return jsonify({"error": "Invalid date"}), 400
@@ -46,6 +49,8 @@ def daily_report():
 @reports_bp.route("/revenue", methods=["GET"])
 @jwt_required()
 def revenue_chart():
+    _, err = require(*REPORT_ROLES)
+    if err: return err
     from datetime import timedelta as td
     period = request.args.get("period", "weekly")
     now    = datetime.now(KENYA_TZ)

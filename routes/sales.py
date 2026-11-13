@@ -6,7 +6,8 @@ from extensions import db
 from models.sale import Sale, SaleItem
 from models.order import kenya_time
 from line_items import build_lines
-from tenant import current_user, scoped
+from tenant import scoped
+from roles import require, CASHIER_ROLES
 
 sales_bp = Blueprint("sales", __name__)
 
@@ -14,6 +15,8 @@ sales_bp = Blueprint("sales", __name__)
 @sales_bp.route("/", methods=["GET"])
 @jwt_required()
 def get_sales():
+    _, err = require(*CASHIER_ROLES)
+    if err: return err
     return jsonify([{
         "id":             s.id,
         "cashier_name":   s.cashier_name,
@@ -28,9 +31,8 @@ def get_sales():
 @sales_bp.route("/", methods=["POST"])
 @jwt_required()
 def create_sale():
-    user = current_user()
-    if user is None:
-        return jsonify({"error": "Account is inactive"}), 401
+    user, err = require(*CASHIER_ROLES)
+    if err: return err
     data  = request.get_json(silent=True) or {}
     lines, total, err = build_lines(user, data.get("items"))
     if err:

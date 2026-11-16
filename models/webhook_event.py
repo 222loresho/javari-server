@@ -14,6 +14,7 @@ class WebhookEvent(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
     source      = db.Column(db.String(40), default="generic", index=True)
     event_type  = db.Column(db.String(80))
+    delivery    = db.Column(db.String(64))
     payload     = db.Column(db.JSON)
     ip          = db.Column(db.String(64))
     received_at = db.Column(db.DateTime, default=kenya_time, index=True)

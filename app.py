@@ -88,6 +88,7 @@ def ensure_schema():
             ("orders",     "market_id",  "INTEGER"),
             ("markets",    "code",       "VARCHAR(12)"),
             ("users",      "pin_length", "INTEGER"),
+            ("webhook_events", "delivery", "VARCHAR(64)"),
         ]
         for table, column, ddl in additions:
             if table not in tables:

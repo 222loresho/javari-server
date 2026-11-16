@@ -64,6 +64,7 @@ from models.order import Order, OrderItem
 from models.market import Market
 from models.login_event import LoginEvent
 from models.audit_log import AuditLog
+from models.webhook_event import WebhookEvent
 
 from sqlalchemy import inspect, text
 from venue_codes import venue_code_for
@@ -81,6 +82,8 @@ def ensure_schema():
             ("users",      "market_id",  "INTEGER"),
             ("categories", "market_id",  "INTEGER"),
             ("products",   "market_id",  "INTEGER"),
+            ("products",   "barcode",    "VARCHAR(40)"),
+            ("products",   "unit",       "VARCHAR(12)"),
             ("sales",      "market_id",  "INTEGER"),
             ("orders",     "market_id",  "INTEGER"),
             ("markets",    "code",       "VARCHAR(12)"),
@@ -223,6 +226,7 @@ from routes.orders import orders_bp
 from routes.users import users_bp
 from routes.reports import reports_bp
 from routes.superadmin import superadmin_bp
+from routes.webhooks import webhooks_bp
 
 app.register_blueprint(auth_bp,       url_prefix='/api/auth')
 app.register_blueprint(products_bp,   url_prefix='/api/products')
@@ -232,6 +236,7 @@ app.register_blueprint(orders_bp,     url_prefix='/api/orders')
 app.register_blueprint(users_bp,      url_prefix='/api/users')
 app.register_blueprint(reports_bp,    url_prefix='/api/reports')
 app.register_blueprint(superadmin_bp,  url_prefix='/api/superadmin')
+app.register_blueprint(webhooks_bp,    url_prefix='/api/webhooks')
 
 @app.get("/api/health")
 def health():

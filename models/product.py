@@ -9,3 +9,5 @@ class Product(db.Model):
     category_id = db.Column(db.Integer,       db.ForeignKey("categories.id"), nullable=True)
     image_url   = db.Column(db.String(500),   nullable=True)
     market_id   = db.Column(db.Integer,       db.ForeignKey("markets.id"), nullable=True)
+    barcode     = db.Column(db.String(40),    nullable=True)
+    unit        = db.Column(db.String(12),    nullable=True)

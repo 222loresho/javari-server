@@ -7,10 +7,13 @@ from tenant import current_user, scoped, in_venue
 
 products_bp = Blueprint("products", __name__)
 
+UNITS = ("pc", "kg", "g", "l", "ml", "pack", "dozen", "bunch")
+
 
 def serialize(p):
     return {"id": p.id, "name": p.name, "price": float(p.price), "stock": p.stock,
-            "category_id": p.category_id, "image_url": p.image_url}
+            "category_id": p.category_id, "image_url": p.image_url,
+            "barcode": p.barcode, "unit": p.unit or "pc"}
 
 
 def _admin_error(user):
@@ -33,6 +36,24 @@ def _stock(value):
     except (TypeError, ValueError):
         return None
     return stock if stock >= 0 else None
+
+
+def _barcode(value):
+    return str(value or "").strip()[:40] or None
+
+
+def _unit(value):
+    unit = str(value or "").strip().lower() or "pc"
+    return unit if unit in UNITS else None
+
+
+def _barcode_taken(code, market_id, exclude_id=None):
+    if not code:
+        return False
+    query = Product.query.filter(Product.barcode == code, Product.market_id == market_id)
+    if exclude_id is not None:
+        query = query.filter(Product.id != exclude_id)
+    return query.first() is not None
 
 
 def _category_ok(cat_id, user):
@@ -68,6 +89,8 @@ def create_product():
     price = _price(data.get("price"))
     stock = _stock(data.get("stock", 0))
     cat   = data.get("category_id") or None
+    barcode = _barcode(data.get("barcode"))
+    unit    = _unit(data.get("unit"))
     if not name:
         return jsonify({"error": "Product name required"}), 400
     if price is None:
@@ -76,9 +99,13 @@ def create_product():
         return jsonify({"error": "Stock must be zero or more"}), 400
     if not _category_ok(cat, user):
         return jsonify({"error": "Unknown category"}), 400
+    if unit is None:
+        return jsonify({"error": "Unit must be one of: " + ", ".join(UNITS)}), 400
+    if _barcode_taken(barcode, user.market_id):
+        return jsonify({"error": "Barcode already used by another product"}), 409
     p = Product(name=name, price=price, stock=stock,
                 category_id=cat, image_url=str(data.get("image_url") or "")[:500] or None,
-                market_id=user.market_id)
+                market_id=user.market_id, barcode=barcode, unit=unit)
     db.session.add(p)
     db.session.commit()
     return jsonify({"message": "Product created"}), 201
@@ -116,6 +143,16 @@ def update_product(pid):
         p.category_id = cat
     if "image_url" in data:
         p.image_url = str(data.get("image_url") or "")[:500] or None
+    if "barcode" in data:
+        barcode = _barcode(data.get("barcode"))
+        if _barcode_taken(barcode, p.market_id, exclude_id=p.id):
+            return jsonify({"error": "Barcode already used by another product"}), 409
+        p.barcode = barcode
+    if "unit" in data:
+        unit = _unit(data.get("unit"))
+        if unit is None:
+            return jsonify({"error": "Unit must be one of: " + ", ".join(UNITS)}), 400
+        p.unit = unit
     db.session.commit()
     return jsonify({"message": "Product updated"})
 

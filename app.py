@@ -22,7 +22,6 @@ app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 
 default_origins = [
-    "https://222loresho.github.io",
     r"\Ahttps://([a-z0-9-]+\.)*chajio\.(cloud|top)\Z",
     r"\Ahttps://(www\.)?vendaura\.co\.ke\Z",
 ]

@@ -4,7 +4,7 @@ from extensions import db
 from models.user import User
 from models.market import Market
 from models.sale import Sale
-from models.order import Order
+from models.order import Order, OrderItem
 from models.product import Product
 from models.category import Category
 from venue_codes import venue_code_for
@@ -102,6 +102,40 @@ def delete_market(mid):
     db.session.commit()
     audit_log("market.delete", f"{name} ({code})")
     return jsonify({"message": "Market deleted"})
+
+@superadmin_bp.route("/orders/clear", methods=["POST"])
+@jwt_required()
+def clear_open_orders():
+    err = require_superadmin()
+    if err: return err
+    d   = request.get_json(silent=True) or {}
+    mid = d.get("market_id")
+    q   = Order.query.filter(Order.status.in_(("pending", "submitted")))
+    if mid not in (None, "", "all"):
+        try:
+            mid = int(mid)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid venue"}), 400
+        if not Market.query.get(mid):
+            return jsonify({"error": "Venue not found"}), 404
+        q = q.filter(Order.market_id == mid)
+    else:
+        mid = None
+    orders = q.all()
+    counts = {"pending": 0, "submitted": 0}
+    for o in orders:
+        counts[o.status] = counts.get(o.status, 0) + 1
+        OrderItem.query.filter_by(order_id=o.id).delete()
+        db.session.delete(o)
+    db.session.commit()
+    label = f"venue {mid}" if mid is not None else "all venues"
+    audit_log("orders.clear_open", f"{label}: removed {len(orders)} ({counts['pending']} pending, {counts['submitted']} submitted)")
+    return jsonify({
+        "message": f"Cleared {len(orders)} open table(s)",
+        "removed": len(orders),
+        "pending": counts["pending"],
+        "submitted": counts["submitted"],
+    })
 
 # ── Dashboard analytics ───────────────────────────────────────────────────────
 @superadmin_bp.route("/dashboard", methods=["GET"])
